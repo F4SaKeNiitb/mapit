@@ -1,23 +1,35 @@
 import os
 from dotenv import load_dotenv
-import anthropic
+import google.generativeai as genai
 
 load_dotenv()
 
-API_KEY = os.getenv("ANTHROPIC_API_KEY")
+# API_KEY and genai.configure moved into call_gemini
 
-if API_KEY is None:
-    raise ValueError("ANTHROPIC_API_KEY not found in .env file.")
-
-client = anthropic.Anthropic(api_key=API_KEY)
-
-def call_anthropic(prompt: str, model: str = "claude-3-haiku-20240307", max_tokens: int = 256) -> str:
+def call_gemini(prompt: str, model: str = "gemini-pro", max_tokens: int = 256) -> str:
     """
-    Calls Anthropic LLM with the given prompt and returns the response.
+    Calls Google Gemini LLM with the given prompt and returns the response.
+    Handles API key configuration internally.
     """
-    response = client.messages.create(
-        model=model,
-        max_tokens=max_tokens,
-        messages=[{"role": "user", "content": prompt}]
-    )
-    return response.content[0].text
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        return "Error: GEMINI_API_KEY not configured. LLM call skipped."
+
+    try:
+        genai.configure(api_key=api_key)
+        model_instance = genai.GenerativeModel(model) # Renamed to avoid conflict
+        response = model_instance.generate_content(
+            prompt,
+            generation_config=genai.types.GenerationConfig(max_output_tokens=max_tokens)
+        )
+        if response.candidates:
+            if response.prompt_feedback.block_reason:
+                return f"Request blocked due to: {response.prompt_feedback.block_reason}"
+            return response.text
+        else:
+            # Check for blocking at the prompt feedback level if candidates are empty
+            if response.prompt_feedback and response.prompt_feedback.block_reason:
+                return f"Request blocked due to: {response.prompt_feedback.block_reason}. No content generated."
+            return "No content generated. The prompt might have been blocked or the response was empty."
+    except Exception as e:
+        return f"An error occurred during the Gemini API call: {e}"
